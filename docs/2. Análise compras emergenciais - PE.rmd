@@ -1,0 +1,298 @@
+---
+title: "2. Análise compras emergenciais - PE"
+author: "Jonas Coelho"
+date: "16/06/2021"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+```
+
+# I. Introdução
+
+Essa análise busca repetir o que foi realizado em 2020 para a análise de compras emergenciais do Rio Grande do Sul, agora para o estado de Pernambuco.
+
+Como no doc 1, os dados são extraídos diretamente da base do Tá de Pé, porém, para garantir que a análise permaneça a mesma, o resultado de cada query foi salvo em um csv carregado na análise desse doc.
+
+
+```{r}
+# Importar arquivos
+item_contrato <- readr::read_csv("../dados/item_contrato_covid.csv", col_types = readr::cols(.default = "c"))
+info_contrato <- readr::read_csv("../dados/info_contrato_covid.csv", col_types = readr::cols(.default = "c"))
+item_licitacao <- readr::read_csv("../dados/item_licitacao_covid.csv", col_types = readr::cols(.default = "c"))
+orgaos <- readr::read_csv("../dados/orgaos_covid.csv", col_types = readr::cols(.default = "c"))
+casos <- readr::read_csv2("../dados/casos.csv", col_types = readr::cols(.default = "c"))
+similares <- readr::read_csv("../dados/itens_similares_covid_11_06_2021.csv", col_types = readr::cols(.default = "c"))
+empenho <- readr::read_csv("../dados/info_empenhos_covid.csv", col_types = readr::cols(.default = "c"))
+
+alertas <- readr::read_csv("../dados/alertas_covid_joined.csv", col_types = readr::cols(.default = "c"))
+
+cnpjs <- readr::read_csv("../dados/dados_cadastrais.csv", col_types = readr::cols(.default = "c"))
+
+pib_mun <- sidrar::get_sidra(api = "/t/5938/n6/all/v/37/p/last%201/d/v37%200") %>%
+  janitor::clean_names() %>%
+  select(municipio_codigo, municipio, valor) %>%
+  rename(pib = valor)
+
+pop <- sidrar::get_sidra(6579,
+                         period = '2020',
+                         variable = 9324,
+                         geo = "City") %>%
+  janitor::clean_names() %>%
+  select(municipio_codigo, municipio, valor) %>%
+  rename(pop = valor)
+```
+
+Como antes, é necessário filtrar o arquivo do Ministério da Saúde com casos registrados para manter a linha com informações mais recentes.
+
+```{r}
+# Filtrar apenas valores máximos de casos e óbitos
+casos <- casos %>% mutate(data = as.Date(data, format="%Y-%m-%d"))
+
+equivalencias_codigos <- pop %>%
+  select(municipio_codigo) %>%
+  mutate(cod_sem_ver = substr(municipio_codigo, 1,6))
+
+max_casos <- casos %>% group_by(codmun) %>% top_n(1, data) %>%
+  janitor::clean_names() %>%
+  left_join(equivalencias_codigos, by = c('codmun' = 'cod_sem_ver')) %>%
+  rename(cd_municipio_ibge = municipio_codigo)
+```
+
+Também vamos filtrar as compras apenas no nível municipal. Também iremos usar apenas as compras de Pernambuco para uma análise mais uniformizada.
+
+```{r}
+# Filtrar apenas dados municipais
+item_contrato_old <- item_contrato
+
+item_contrato <- item_contrato %>%
+  left_join(select(orgaos, id_orgao, cd_municipio_ibge, esfera), by="id_orgao") %>%
+  filter(esfera == "MUNICIPAL" & sigla_estado == 'PE') %>%
+  mutate(vl_item_contrato = as.numeric(vl_item_contrato), vl_total_item_contrato = as.numeric(vl_total_item_contrato), qt_itens_contrato = as.numeric(qt_itens_contrato))
+
+info_contrato_old <- info_contrato
+
+info_contrato <- info_contrato %>%
+  filter(id_contrato %in% item_contrato$id_contrato)
+```
+
+
+Agora vamos gerar tabelas adicionais que irão auxiliar na tarefa de analisar esses dados. A primeira delas é a de licitações efetivadas. Com base na tabela original de itens dos contratos, iremos ver quantas ids de licitações por cada município. Dessa forma, teremos uma lista apenas daquelas licitações que foram efetivadas. Não é correto dizer que são licitações com contratos assinados porque em alguns casos não é exigido contrato, mas a inserção dos dados é feita ainda assim na tabela de informações de contratos.
+
+```{r}
+# Somar licitações efetivadas
+cont_licit_efetivadas <- item_contrato %>%
+  group_by(cd_municipio_ibge, id_licitacao) %>%
+  summarize(lic_concluidas=n()) %>%
+  group_by(cd_municipio_ibge) %>%
+  summarize(lic_concluidas=n())
+```
+
+Antes, tínhamos desenvolvido um regex para identificar possíveis serviços (e excluir da análise visto que só estamos focados em compras). Agora, já possuímos uma coluna na base indicando isso. Vamos ver se nosso código antigo é sub ou superinclusivo, comparativamente.
+
+```{r}
+servicos <- item_contrato %>%
+  mutate(ds_item = tolower(iconv(ds_item , from="UTF-8", to="ASCII//TRANSLIT"))) %>%
+  mutate(flag_servico = ifelse(stringr::str_detect(ds_item, "(contratacao de empresa)|(prestacao de servico[s]?)|^servico[s]?|(a prestacao de)|(contratacao de prestacao)|(contratacao de servico)|(aluguel/loca)|servia|(contratacao contratacao de)|(contratacao da empresa)|(contratacao de)|(repasse hospital)|(empenho global)|(locacao de infraestrutura)|(fornecimento de alimentacao)|(fornecimento de gestao)|(contratacao emergencial gerenciamento)|(gerenciamento, operacionalizacao)|(reforma do predio)|(execucao de obras)|(contratacao, de servicos)|convenio"), 1, 0))
+  
+```
+
+```{r}
+servicos %>%
+  filter((servico == 0 & flag_servico == 1) | (servico == 1 & flag_servico == 0)) %>%
+  nrow()
+```
+
+Tudo certo podemos prosseguir. Agora vamos criar as tabelas com os valores pagos a cada fornecedor. Teremos que fazer uma mudança em relação ao ano passado, no entanto. Antes, usamos os valores liquidados como referência do que foi repassado a cada fornecedor. Para Pernambuco, a tabela de empenhos ainda não pode ser associada com a de contratos/licitação, por esse motivo a análise terá que ser feita com base nos contratos assinados, independentemente dos valores repassados aos fornecedores.
+
+```{r}
+fornecedores_mun <- info_contrato %>%
+  mutate(vl_contrato = as.numeric(vl_contrato),
+    vl_contrato = tidyr::replace_na(vl_contrato, 0)) %>%
+  left_join(select(orgaos, id_orgao, cd_municipio_ibge, nome_municipio)) %>%
+  group_by(id_contrato, nr_documento_contratado, cd_municipio_ibge) %>%
+  summarize(vl_contrato = sum(vl_contrato)) %>%
+  group_by(nr_documento_contratado, cd_municipio_ibge) %>%
+  summarize(vl_contrato = sum(vl_contrato), lic_concluidas=n_distinct(id_contrato)) %>% 
+  group_by(nr_documento_contratado) %>%
+  summarize(lic_concluidas=sum(lic_concluidas), vl_contrato = sum(vl_contrato), municipios_contratantes= n_distinct(cd_municipio_ibge))
+
+
+fornecedores <- select(info_contrato, nr_documento_contratado) %>%
+  group_by(nr_documento_contratado) %>%
+  slice(1) %>%
+  ungroup() %>%
+  right_join(fornecedores_mun) %>%
+  group_by(nr_documento_contratado) %>%
+  summarize(lic_concluidas=sum(lic_concluidas), municipios_contratantes=sum(municipios_contratantes), vl_contrato = sum(vl_contrato)) %>%
+  left_join(select(cnpjs, cnpj, razao_social, nome_fantasia, data_situacao_cadastral, municipio), by = c('nr_documento_contratado' = 'cnpj'))
+```
+Outra tabela necessária é a soma de compras feitas de "objetos", ou seja, tudo aquilo que não for considerado serviço:
+
+```{r}
+# Somar valores não-serviços
+soma_mun_item_contr_filtrados <- item_contrato %>%
+  filter(servico == 'false') %>%
+  group_by(cd_municipio_ibge) %>% 
+  summarise(soma_vl_item_contrato_objetos = sum(vl_total_item_contrato), soma_qt_itens_contrato_objetos = sum(qt_itens_contrato)) %>%
+  unique()
+```
+
+
+Em seguida, vamos gerar a tabela de remédios sem eficácia comprovada.
+
+```{r}
+# Remédios
+remedios <- item_contrato %>%
+  mutate(ds_item = tolower(iconv(ds_item , from="UTF-8", to="ASCII//TRANSLIT"))) %>%
+  filter(stringr::str_detect(ds_item, "cloroquina|ivermectina|azitromicina")) %>%
+  mutate(flag_remedio = 1)
+
+lista_remedios <- c("cloroquina", "ivermectina", "azitromicina")
+
+# Criar coluna tipo remedio
+remedios <- lista_remedios %>%
+  purrr::map(function(x) {
+    remedios %>%
+      mutate(selec = stringr::str_detect(ds_item, x), categoria_item = x) %>%
+      filter(selec == TRUE)
+  }) %>%
+  bind_rows() %>%
+  distinct(id_item_contrato, .keep_all= TRUE)
+
+# Somar valores remédios
+soma_remedios <- remedios %>%
+  group_by(cd_municipio_ibge) %>% 
+  summarise(soma_vl_tota_item_contrato_objetos = sum(vl_total_item_contrato), soma_contrato_objetos = n_distinct(id_contrato)) %>%
+  left_join(select(orgaos, cd_municipio_ibge, nome_municipio)) %>%
+  unique()
+
+soma_remedios_categoria <- remedios %>%
+  group_by(categoria_item) %>% 
+  summarise(soma_vl_tota_item_contrato_objetos = sum(vl_total_item_contrato), soma_contrato_objetos = n_distinct(id_contrato), municipios_contratantes = n_distinct(cd_municipio_ibge)) %>%
+  unique()
+```
+
+Agora vamos gerar as tabelas com os dados econômicos e demográficos dos municípios, bem como os seus gastos totais.
+
+```{r}
+# Somar valores contratados todos
+soma_mun_item_contr <- item_contrato %>%
+  group_by(cd_municipio_ibge) %>% 
+  summarise(soma_vl_item_contrato = sum(vl_total_item_contrato), soma_qt_itens_contrato = sum(qt_itens_contrato)) %>%
+  left_join(select(pib_mun, municipio_codigo, pib), by= c("cd_municipio_ibge" = "municipio_codigo")) %>%
+  left_join(select(pop, municipio_codigo, pop), by= c("cd_municipio_ibge" = "municipio_codigo")) %>%
+  left_join(select(max_casos, cd_municipio_ibge, casos_acumulado, obitos_acumulado)) %>%
+  left_join(cont_licit_efetivadas, by = c("cd_municipio_ibge")) %>%
+  left_join(soma_mun_item_contr_filtrados, by = c("cd_municipio_ibge")) %>%
+  unique() %>%
+  mutate(casos_acumulado = as.numeric(casos_acumulado), obitos_acumulado = as.numeric(obitos_acumulado))
+
+# Calculcar variáveis proporcionais
+soma_mun_item_contr <- soma_mun_item_contr %>%
+  mutate(valor_sobre_pib = soma_vl_item_contrato/pib) %>%
+  mutate(valor_sobre_pop = soma_vl_item_contrato/pop) %>%
+  mutate(valor_sobre_casos = soma_vl_item_contrato/casos_acumulado) %>%
+  mutate(valor_sobre_obitos = soma_vl_item_contrato/obitos_acumulado) %>%
+  mutate(casos_sobre_hab = casos_acumulado/pop) %>%
+  mutate(obitos_sobre_hab = obitos_acumulado/pop)
+```
+
+Encerrando essa primeira etapa de tabelas, vamos partir agora para as tabelas de itens mais comprados. 
+
+```{r}
+# Filtrar similares
+similares_filtrado <- similares %>%
+  mutate(ds_1_item_pesq = tolower(iconv(ds_1_item_pesq, from="UTF-8", to="ASCII//TRANSLIT")), ds_2_item_pesq = tolower(iconv(ds_2_item_pesq, from="UTF-8", to="ASCII//TRANSLIT")), ds_3_item_pesq = tolower(iconv(ds_3_item_pesq, from="UTF-8", to="ASCII//TRANSLIT"))) %>%
+  group_by(id_item_pesquisado) %>%
+  top_n(1, id_item_similar) %>%
+  filter(stringr::str_detect(ds_3_item_pesq, "mascara[s]?|teste[s]?|avental?|alcool?|luva[s]?|termometro?|macacao?|touca?|protetor?|oculos?|sabonete?|sabao?|oximetro?|jaleco?|detergente?|kit?"))
+
+itens_epis <- item_contrato %>%
+  filter(servico == 'false') %>%
+  mutate(ds_item = tolower(iconv(ds_item, from="UTF-8", to="ASCII//TRANSLIT"))) %>%
+  filter(stringr::str_detect(ds_item, "mascara|aventa|luva|macac|touca|oculos|jaleco|sapatilha|teste|alcoo|termometro|sabonete|oximetro|sabao|detergente|desinfentante|uniforme|tapete|detergente|hipoclorito|sapato|viseira")) %>%
+  group_by(ds_1) %>%
+  summarize(aquisicoes = n_distinct(id_licitacao), total_comprado = sum(qt_itens_contrato), total_valor_comprado = sum(vl_total_item_contrato))
+
+medianas <- similares_filtrado %>%
+  filter(stringr::str_detect(ds_1_item_pesq, "mascara[s]?|teste[s]?|avental?|alcool?|luva[s]?|termometro?|macacao?|touca?|protetor?|oculos?|sabonete?|sabao?|oximetro?|jaleco?|detergente?") & unidade_medida_item_pesq == "UN") %>%
+  group_by(ds_1_item_pesq) %>%
+  top_n(1, mediana_no_estado) %>%
+  select(ds_1_item_pesq, mediana_no_estado) %>%
+  unique()
+```
+
+Agora vamos importar os valores dos dados obtidos no RS.
+
+```{r}
+load('../dados/regressoes.RData')
+```
+
+E preencher com as estimativas em PE.
+
+```{r}
+#! Criar listas
+selecao <- c("mascara","aventa","luva","macac","touca","oculos","jaleco","sapatilha","teste","alcoo","sabonete","sabao","detergente","desinfetante","uniforme","detergente","hipoclorito","sapato","viseira")
+
+reg_itens_analise <- item_contrato %>%
+  mutate(ds_item = tolower(iconv(ds_item, from="UTF-8", to="ASCII//TRANSLIT")))
+
+# Criar indicadores de mais informação
+reg_itens_analise <- reg_itens_analise %>%
+  mutate(flag_pacote = if_else((stringr::str_detect(ds_item, "pacote|com \\d|c/ \\d|c \\d|\\d un|unidades|und|\\d uni|c/\\d|kg| un |cx|pacote|pct|kg|und|quilo| unid ") & !stringr::str_detect(ds_item, "\\dl|\\d l|\\d ml|\\dml" )),1,0),
+         flag_material = if_else(stringr::str_detect(ds_item, "tecido|latex|material|tnt|plastic|plastic|pvc|pff|acrilic|algodao|polipropileno|nitrilica|borracha|polietileno|n95|galvanizado|poliester|inox|vinil|mdf|aluminio|nylon|ferro|policarbonato|nao-tecido|nitrilica|prata|metalica|microfibra|\\(tnt\\)|acrilica"),1,0),
+         flag_detalhe_ad = if_else(stringr::str_detect(ds_item, "tamanho|cor|elastico|cm|100%|branco|ambidestra|esteril|impermeavel|gramatura|mg|atoxica|preto|natural|azul|medindo|mm|branca|lubrificada|capacidade|bioabsorvivel|certificado|peso|comprimento|lei|nbr|normas|caracteristicas|costura|dimensoes|bolsos|abnt|flexivel|infantil|anvisa|sanfonada|densidade|certificacao|gramas|inmetro|antiderrapante"),1,0),
+         nivel_data2 = as.Date(stringr::str_sub(dt_inicio_vigencia, start = 1L, end = 10), tryFormats = c("%Y-%m-%d"))
+  )
+
+# Filtrar pela seleção de itens
+reg_itens_analise <- selecao %>%
+  purrr::map(function(x) {
+    reg_itens_analise %>%
+      mutate(selec = stringr::str_detect(ds_item, x), categoria_item = x) %>%
+      filter(selec == TRUE)
+  }) %>%
+  bind_rows() %>%
+  distinct(id_item_contrato, .keep_all= TRUE)
+
+# Criar variaveis por item
+reg_itens_analise2 <- reg_itens_analise %>%
+  filter(vl_item_contrato > 0.1) %>%
+  filter(!stringr::str_detect(ds_item, "lavadora de pressao|totem|totens|toten|dispenser")) %>%
+  group_by(categoria_item) %>%
+  mutate(tamanho_texto = stringr::str_length(ds_item),
+         n_palavras = sapply(strsplit(ds_item, " "), length),
+         bol_nao_unidade = if_else(sg_unidade_medida == "UN", 0, 1),
+         median_palavras = median(n_palavras),
+         palavras_perc = n_palavras/median_palavras,
+         bol_1_uni = if_else(qt_itens_contrato == 1, 1, 0),
+         nivel_data2 = lubridate::floor_date(as.Date(stringr::str_sub(dt_inicio_vigencia, start = 1L, end = 10), tryFormats = c("%Y-%m-%d")),"month")) %>%
+  ungroup()
+
+reg_itens_analise2 <- reg_itens_analise2 %>%
+  group_by(categoria_item,nivel_data2) %>%
+  mutate(median_price = median(vl_item_contrato, na.rm=T),
+         price_perc = vl_item_contrato/median_price,
+         flag_pre_e_uni = if_else(bol_1_uni == 1 & price_perc > 1.5 & bol_nao_unidade == 0, 1, 0)) %>%
+  ungroup
+
+# Preencher com valores estimado
+reg_itens_analise2 <- reg_itens_analise2 %>%
+  mutate(estimativa_med_cor = predict(reg_med_cor, reg_itens_analise2),
+         estimativa_material = predict(reg_material, reg_itens_analise2))
+```
+

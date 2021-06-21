@@ -1,0 +1,97 @@
+---
+title: "1. Análise TDP merenda"
+author: "Jonas Coelho"
+date: "15/06/2021"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Bibliotecas:
+```{r}
+library(dplyr)
+```
+
+
+
+# I. Importação dos dados
+
+Para iniciar, iremos exportar os dados gerados pela malha fina do TDP merenda. Como são duas análises distintas, serão duas tabelas separadas: uma com os alertas com base na empresa (CNAE ou data de abertura suspeitos) e outra com os valores elevados. Todos os comandos utilizados podem ser obtidos diretamente da base com o código SQL exibido. Para fins de estabilidade, os resultados desses queries serão carregados nesse doc através de um CSV.
+
+```{sql eval=false}
+Select alerta.id_alerta, alerta.id_contrato, id_tipo, info, id_licitacao, descricao_objeto_contrato, cnpj, razao_social, nome_fantasia, data_inicio_atividade, cnae_fiscal, nm_secao, nm_divisao, nm_grupo, nm_classe, nm_cnae, ds_item, total_vendas_item, n_vendas_semelhantes  from alerta LEFT JOIN contrato c on alerta.id_contrato = c.id_contrato left join dados_cadastrais d on nr_documento_contratado = d.cnpj  left join cnae e on d.cnae_fiscal = e.id_cnae left join item_atipico on alerta.id_alerta = item_atipico.id_alerta;
+```
+
+Adicionalmente, vamos carregar os itens de descrição dos contratos e licitações
+
+```{sql eval=false}
+SELECT * FROM contrato
+SELECT * FROM licitacao
+```
+
+```{r}
+item_contrato <- read.delim('../dados/item_contrato.csv', sep = ',', fileEncoding = 'UTF-8') %>%
+  mutate(ds_item_limpo = tolower(iconv(ds_item, to="ASCII//TRANSLIT")))
+```
+
+```{r}
+alertas <- read.delim('../dados/alertas.csv', sep = ',', fileEncoding = 'UTF-8')
+```
+
+
+
+
+
+
+# II. Alertas
+
+
+
+# III. Palavras mais comuns
+
+Com base na descrição dos itens, vamos verificar as palavras mais comuns.
+
+```{r}
+df_freq <- sort(table(unlist(strsplit(item_contrato$ds_item_limpo, " "))), decreasing = T)
+```
+
+```{r}
+head(df_freq, n = 300)
+```
+
+É possível notar que alguns produtos se destacam entre as centenas de palavras mais comuns, tais como: pao, farinha, carne, sal, feijao, batata, oleo, tomate, arroz, ovos, cafe, laranja, queijo, repolho e cebola. Entretanto, analisando manualmente a base foi possível constatar que a mera presença dessas palavras não indica que se trata do item em questão. Isso foi mais notável no caso de ingredientes e sabores como farinha, sal, oleo, queijo e laranja.
+
+# IV. Medidas incorretas
+
+
+Código utilizado anteriormente
+```{r eval=FALSE}
+aventais2 <- aventais %>%
+  mutate(ds_item = tolower(iconv(ds_item, from="UTF-8", to="ASCII//TRANSLIT"))) %>%
+  filter(stringr::str_detect(ds_item, "aventa")) %>%
+  mutate(flag_pacote = if_else(stringr::str_detect(ds_item, "pacote|kit|com \\d|c/ \\d|c \\d|\\d un|unidades|und|\\d uni|c/\\d|kg| un |cx|pacote|pct|kg|und|quilo| unid "),1,0),
+         flag_material = if_else(stringr::str_detect(ds_item, "tecido|latex|material|tnt|plastic|plastic|pvc|pff|acrilic|algodao|polipropileno|nitrilica|borracha|polietileno|n95|galvanizado|poliester|inox|vinil|mdf|aluminio|nylon|ferro|policarbonato|nao-tecido|nitrilica|prata|metalica|microfibra|\\(tnt\\)|acrilica"),1,0),
+         flag_detalhe_ad = if_else(stringr::str_detect(ds_item, "tamanho|cor|elastico|cm|100%|branco|ambidestra|esteril|impermeavel|gramatura|mg|atoxica|preto|natural|azul|medindo|mm|branca|lubrificada|capacidade|bioabsorvivel|certificado|peso|comprimento|lei|nbr|normas|caracteristicas|costura|dimensoes|bolsos|abnt|flexivel|infantil|anvisa|sanfonada|densidade|certificacao|gramas|inmetro|antiderrapante"),1,0),
+         tamanho_texto = stringr::str_length(ds_item),
+         n_palavras = sapply(strsplit(ds_item, " "), length),
+         bol_nao_unidade = if_else(sg_unidade_medida == "UN", 0, 1)) %>%
+  mutate(vl_item_contrato = gsub("R\\$ ", "" ,vl_item_contrato),
+         vl_item_contrato = as.numeric(gsub(",", "", vl_item_contrato))) %>%
+  filter(vl_item_contrato > 0.1) %>%
+  mutate(median_price = median(vl_item_contrato, na.rm=T),
+         price_perc = vl_item_contrato/median_price,
+         median_text = median(tamanho_texto),
+         tamanho_perc = tamanho_texto/median_text,
+         median_palavras = median(n_palavras),
+         palavras_perc = n_palavras/median_palavras,
+         bol_1_uni = if_else(qt_itens_contrato == 1, 1, 0),
+         flag_pre_e_uni = if_else(bol_1_uni == 1 & price_perc > 1.5 & bol_nao_unidade == 0, 1, 0))
+```
+
