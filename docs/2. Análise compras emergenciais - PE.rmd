@@ -19,6 +19,9 @@ library(dplyr)
 library(ggplot2)
 library(knitr)
 library(kableExtra)
+library(caret)
+
+options(scipen = 9999)
 ```
 
 # I. Introdução
@@ -208,7 +211,8 @@ soma_mun_item_contr <- soma_mun_item_contr %>%
   mutate(valor_sobre_casos = soma_vl_item_contrato/casos_acumulado) %>%
   mutate(valor_sobre_obitos = soma_vl_item_contrato/obitos_acumulado) %>%
   mutate(casos_sobre_hab = casos_acumulado/pop) %>%
-  mutate(obitos_sobre_hab = obitos_acumulado/pop)
+  mutate(obitos_sobre_hab = obitos_acumulado/pop) %>%
+  left_join(select(orgaos, cd_municipio_ibge, nome_municipio))
 ```
 
 Encerrando essa primeira etapa de tabelas, vamos partir agora para as tabelas de itens mais comprados. 
@@ -296,3 +300,66 @@ reg_itens_analise2 <- reg_itens_analise2 %>%
          estimativa_material = predict(reg_material, reg_itens_analise2))
 ```
 
+# II. Descrição
+
+## Número de municípios com contratos
+```{r}
+length(unique(item_contrato$cd_municipio_ibge))
+```
+
+## Número de licitações realizadas
+```{r}
+length(unique(item_contrato$id_licitacao))
+```
+
+## Total gasto
+```{r}
+sum(item_contrato$vl_total_item_contrato)
+```
+
+## Tabela descritiva por município
+```{r}
+soma_mun_item_contr %>%
+  filter(!is.na(cd_municipio_ibge)) %>%
+  select(soma_vl_item_contrato, pop, casos_acumulado, obitos_acumulado, lic_concluidas, valor_sobre_pib, valor_sobre_pop, casos_sobre_hab, obitos_sobre_hab)
+```
+
+## Regressões gastos com casos registrados
+```{r}
+summary(lm(soma_vl_item_contrato ~ casos_acumulado, data=soma_mun_item_contr))
+summary(lm(soma_vl_item_contrato ~ casos_sobre_hab, data=soma_mun_item_contr))
+```
+
+## 10 maiores valores contratados
+```{r}
+head(arrange(select(soma_mun_item_contr,nome_municipio, soma_vl_item_contrato, valor_sobre_pop, valor_sobre_casos, lic_concluidas),desc(soma_vl_item_contrato)), n = 10) %>%
+  unique() %>%
+  kable(align="l", format.args = list(big.mark = ","), digits=2) %>%
+  kable_styling(bootstrap_options = c("striped"), position = "center")
+```
+
+## 10 maiores contratantes
+```{r}
+head(arrange(select(soma_mun_item_contr,nome_municipio, soma_vl_item_contrato, valor_sobre_pop, valor_sobre_casos, lic_concluidas),desc(lic_concluidas)), n = 10) %>%
+  unique() %>%
+  kable(align="l", format.args = list(big.mark = ","), digits=2) %>%
+  kable_styling(bootstrap_options = c("striped"), position = "center")
+```
+
+## 10 maiores fornecedores por número de contrato
+```{r}
+head(arrange(fornecedores,desc(lic_concluidas)), n = 10) %>%
+  kable(align="l", format.args = list(big.mark = ","), digits=2) %>%
+  kable_styling(bootstrap_options = c("striped"), position = "center")
+```
+
+## 10 maiores fornecedores por valor
+```{r}
+fornecedores %>%
+  filter(!is.na(razao_social)) %>%
+  arrange(desc(vl_contrato)) %>%
+  head(n = 20) %>%
+  select(lic_concluidas,municipios_contratantes,vl_contrato,razao_social,data_situacao_cadastral) %>%
+  kable(align="l", format.args = list(big.mark = ","), digits=2) %>%
+  kable_styling(bootstrap_options = c("striped"), position = "center")
+```
