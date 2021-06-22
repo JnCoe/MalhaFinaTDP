@@ -195,7 +195,7 @@ Agora vamos gerar as tabelas com os dados econômicos e demográficos dos munic�
 # Somar valores contratados todos
 soma_mun_item_contr <- item_contrato %>%
   group_by(cd_municipio_ibge) %>% 
-  summarise(soma_vl_item_contrato = sum(vl_total_item_contrato), soma_qt_itens_contrato = sum(qt_itens_contrato)) %>%
+  summarise(soma_vl_item_contrato = sum(vl_item_contrato*qt_itens_contrato), soma_qt_itens_contrato = sum(qt_itens_contrato)) %>%
   left_join(select(pib_mun, municipio_codigo, pib), by= c("cd_municipio_ibge" = "municipio_codigo")) %>%
   left_join(select(pop, municipio_codigo, pop), by= c("cd_municipio_ibge" = "municipio_codigo")) %>%
   left_join(select(max_casos, cd_municipio_ibge, casos_acumulado, obitos_acumulado)) %>%
@@ -307,6 +307,8 @@ reg_itens_analise2 <- reg_itens_analise2 %>%
 length(unique(item_contrato$cd_municipio_ibge))
 ```
 
+No total, há 185 municípios em Pernambuco. Isso significa que temos informações para 85% do estado.
+
 ## Número de licitações realizadas
 ```{r}
 length(unique(item_contrato$id_licitacao))
@@ -314,8 +316,10 @@ length(unique(item_contrato$id_licitacao))
 
 ## Total gasto
 ```{r}
-sum(item_contrato$vl_total_item_contrato)
+sum(as.numeric(info_contrato$vl_contrato))
 ```
+
+No total, foram contratados R$ 462.255.921 pelos municípios pernambucanos, o que corresponde a uma média de quase R\$ 3 milhões por município, um valor consideravelmente alto, mesmo quando se tem em perspectiva que corresponde a gastos de um ano inteiro. Vamos ver por município para ver se encontramos algo suspeito nos valores obtidos.
 
 ## Tabela descritiva por município
 ```{r}
@@ -323,7 +327,11 @@ soma_mun_item_contr %>%
   filter(!is.na(cd_municipio_ibge)) %>%
   select(cd_municipio_ibge, soma_vl_item_contrato, pop, casos_acumulado, obitos_acumulado, lic_concluidas, valor_sobre_pib, valor_sobre_pop, casos_sobre_hab, obitos_sobre_hab) %>%
   left_join(select(orgaos, id_orgao, cd_municipio_ibge, nome_municipio)) %>%
-  unique()
+  select(nome_municipio, soma_vl_item_contrato, pop, casos_acumulado, obitos_acumulado, lic_concluidas, valor_sobre_pib, valor_sobre_pop, casos_sobre_hab, obitos_sobre_hab) %>%
+  unique() %>%
+  arrange(desc(as.numeric(soma_vl_item_contrato))) %>%
+  kable(align="l", format.args = list(big.mark = ","), digits=2) %>%
+  kable_styling(bootstrap_options = c("striped"), position = "center")
 ```
 
 ## Regressões gastos com casos registrados
