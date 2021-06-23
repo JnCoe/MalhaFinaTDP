@@ -9,6 +9,11 @@ output:
     df_print: paged
     code_folding: hide
 ---
+```{css, echo=FALSE}
+body {
+    position: absolute;
+    left: 0px;}
+```
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -45,10 +50,20 @@ alertas <- readr::read_csv("../dados/alertas_covid_joined.csv", col_types = read
 
 cnpjs <- readr::read_csv("../dados/dados_cadastrais.csv", col_types = readr::cols(.default = "c"))
 
+```
+
+Para dados do IBGE, nós podemos usar a biblioteca SIDRAR. Porém, para evitar requests desnecessários, vamos deixar as tabelas de interesse já salvas localmente e carregá-las direto dos arquivos. O código para obtenção dos dados pode ser visualizado abaixo.
+
+```{r}
+load('../dados/ibge.rdata')
+```
+
+```{r eval=FALSE}
 pib_mun <- sidrar::get_sidra(api = "/t/5938/n6/all/v/37/p/last%201/d/v37%200") %>%
   janitor::clean_names() %>%
   select(municipio_codigo, municipio, valor) %>%
   rename(pib = valor)
+
 
 pop <- sidrar::get_sidra(6579,
                          period = '2020',
@@ -89,7 +104,8 @@ item_contrato <- item_contrato %>%
 info_contrato_old <- info_contrato
 
 info_contrato <- info_contrato %>%
-  filter(id_contrato %in% item_contrato$id_contrato)
+  filter(id_contrato %in% item_contrato$id_contrato) %>%
+  mutate(vl_contrato = as.numeric(vl_contrato))
 ```
 
 
@@ -150,7 +166,7 @@ Outra tabela necessária é a soma de compras feitas de "objetos", ou seja, tudo
 soma_mun_item_contr_filtrados <- item_contrato %>%
   filter(servico == 'false') %>%
   group_by(cd_municipio_ibge) %>% 
-  summarise(soma_vl_item_contrato_objetos = sum(vl_total_item_contrato), soma_qt_itens_contrato_objetos = sum(qt_itens_contrato)) %>%
+  summarise(soma_vl_contrato_objetos = sum(vl_total_item_contrato), soma_qt_itens_contrato_objetos = sum(qt_itens_contrato)) %>%
   unique()
 ```
 
@@ -191,25 +207,30 @@ soma_remedios_categoria <- remedios %>%
 
 Agora vamos gerar as tabelas com os dados econômicos e demográficos dos municípios, bem como os seus gastos totais.
 
+> **ATENÇÃO:** Para o RS, a coluna "*vl_total_item_contrato*" da tabela "*item_contratos*" representa corretamente o valor total do contrato ao multiplicar a quantidade de itens pelo valor unitário. No entanto, para PE, essas duas dimensões não estão em sincronia com o valor total do contrato, gerando valores excepcionais no cálculo (por exemplo o contrato db47081cada6470ef63777d290be6ed que possui um valor total calculado de 2 bilhões, mas cujo real valor é 2 milhões de reais). Por esse motivo, podemos apenas utilizar a coluna de valor do contrato da tabela "*info_contratos*". Mais informações sobre isso estão na seção final do doc.
+
 ```{r}
 # Somar valores contratados todos
-soma_mun_item_contr <- item_contrato %>%
-  group_by(cd_municipio_ibge) %>% 
-  summarise(soma_vl_item_contrato = sum(vl_item_contrato*qt_itens_contrato), soma_qt_itens_contrato = sum(qt_itens_contrato)) %>%
+soma_mun_item_contr <- info_contrato %>%
+  left_join(select(orgaos, id_orgao, cd_municipio_ibge, nome_municipio)) %>%
+  group_by(cd_municipio_ibge, nome_municipio) %>% 
+  summarise(soma_vl_contrato = sum(vl_contrato)) %>%
   left_join(select(pib_mun, municipio_codigo, pib), by= c("cd_municipio_ibge" = "municipio_codigo")) %>%
   left_join(select(pop, municipio_codigo, pop), by= c("cd_municipio_ibge" = "municipio_codigo")) %>%
   left_join(select(max_casos, cd_municipio_ibge, casos_acumulado, obitos_acumulado)) %>%
   left_join(cont_licit_efetivadas, by = c("cd_municipio_ibge")) %>%
   left_join(soma_mun_item_contr_filtrados, by = c("cd_municipio_ibge")) %>%
   unique() %>%
-  mutate(casos_acumulado = as.numeric(casos_acumulado), obitos_acumulado = as.numeric(obitos_acumulado))
+  mutate(casos_acumulado = as.numeric(casos_acumulado), obitos_acumulado = as.numeric(obitos_acumulado)) %>%
+  select(-cd_municipio_ibge) %>%
+  relocate(nome_municipio, .before = soma_vl_contrato)
 
 # Calculcar variáveis proporcionais
 soma_mun_item_contr <- soma_mun_item_contr %>%
-  mutate(valor_sobre_pib = soma_vl_item_contrato/pib) %>%
-  mutate(valor_sobre_pop = soma_vl_item_contrato/pop) %>%
-  mutate(valor_sobre_casos = soma_vl_item_contrato/casos_acumulado) %>%
-  mutate(valor_sobre_obitos = soma_vl_item_contrato/obitos_acumulado) %>%
+  mutate(valor_sobre_pib = soma_vl_contrato/pib) %>%
+  mutate(valor_sobre_pop = soma_vl_contrato/pop) %>%
+  mutate(valor_sobre_casos = soma_vl_contrato/casos_acumulado) %>%
+  mutate(valor_sobre_obitos = soma_vl_contrato/obitos_acumulado) %>%
   mutate(casos_sobre_hab = casos_acumulado/pop) %>%
   mutate(obitos_sobre_hab = obitos_acumulado/pop) %>%
   left_join(select(orgaos, cd_municipio_ibge, nome_municipio))
@@ -319,61 +340,47 @@ length(unique(item_contrato$id_licitacao))
 sum(as.numeric(info_contrato$vl_contrato))
 ```
 
-No total, foram contratados R$ 462.255.921 pelos municípios pernambucanos, o que corresponde a uma média de quase R\$ 3 milhões por município, um valor consideravelmente alto, mesmo quando se tem em perspectiva que corresponde a gastos de um ano inteiro. Vamos ver por município para ver se encontramos algo suspeito nos valores obtidos.
+No total, foram contratados R$ 462.255.921 pelos municípios pernambucanos, o que corresponde a uma média de quase R\$ 3 milhões por município, um valor consideravelmente alto, mesmo quando se tem em perspectiva que corresponde a gastos de um ano inteiro. Vamos ver por município para ver se encontramos algo suspeito nos valores obtidos. Os municípios abaixo estão listados pelo valor total dos contratos, mas podem ser reordenados por qualquer uma das demais variáveis.
 
 ## Tabela descritiva por município
 ```{r}
 soma_mun_item_contr %>%
   filter(!is.na(cd_municipio_ibge)) %>%
-  select(cd_municipio_ibge, soma_vl_item_contrato, pop, casos_acumulado, obitos_acumulado, lic_concluidas, valor_sobre_pib, valor_sobre_pop, casos_sobre_hab, obitos_sobre_hab) %>%
+  select(cd_municipio_ibge, soma_vl_contrato, pop, casos_acumulado, obitos_acumulado, lic_concluidas, valor_sobre_pib, valor_sobre_pop, casos_sobre_hab, obitos_sobre_hab) %>%
   left_join(select(orgaos, id_orgao, cd_municipio_ibge, nome_municipio)) %>%
-  select(nome_municipio, soma_vl_item_contrato, pop, casos_acumulado, obitos_acumulado, lic_concluidas, valor_sobre_pib, valor_sobre_pop, casos_sobre_hab, obitos_sobre_hab) %>%
+  select(nome_municipio, soma_vl_contrato, pop, casos_acumulado, obitos_acumulado, lic_concluidas, valor_sobre_pib, valor_sobre_pop, casos_sobre_hab, obitos_sobre_hab) %>%
   unique() %>%
-  arrange(desc(as.numeric(soma_vl_item_contrato))) %>%
-  kable(align="l", format.args = list(big.mark = ","), digits=2) %>%
-  kable_styling(bootstrap_options = c("striped"), position = "center")
+  arrange(desc(as.numeric(soma_vl_contrato))) %>%
+  DT::datatable(filter = 'top') %>%
+  DT::formatRound(c("soma_vl_contrato", "valor_sobre_pib", "valor_sobre_pop", "casos_sobre_hab", "obitos_sobre_hab"), digits=2) %>%
+  DT::formatCurrency("soma_vl_contrato", currency="R$") %>%
+  DT::formatRound(c('pop', 'casos_acumulado', 'obitos_acumulado'), interval = 3, digits=0)
 ```
 
 ## Regressões gastos com casos registrados
 ```{r}
-summary(lm(soma_vl_item_contrato ~ casos_acumulado, data=soma_mun_item_contr))
-summary(lm(soma_vl_item_contrato ~ casos_sobre_hab, data=soma_mun_item_contr))
+summary(lm(soma_vl_contrato ~ casos_acumulado, data=soma_mun_item_contr))
+summary(lm(soma_vl_contrato ~ casos_sobre_hab, data=soma_mun_item_contr))
 ```
+
+## Tabela descritiva fornecedores
+```{r}
+fornecedores %>%
+  arrange(desc(vl_contrato)) %>%
+  select(razao_social, nome_fantasia, lic_concluidas, municipios_contratantes, vl_contrato, municipio, data_situacao_cadastral, nr_documento_contratado) %>%
+  DT::datatable(filter = 'top') %>%
+  DT::formatRound("vl_contrato", digits=2) %>%
+  DT::formatCurrency("vl_contrato", currency="R$") %>%
+  DT::formatDate("data_situacao_cadastral", method = 'toLocaleDateString')
+```
+
 
 ## 10 maiores valores contratados
 ```{r}
 soma_mun_item_contr %>%
-  select(nome_municipio, soma_vl_item_contrato, valor_sobre_pop, valor_sobre_casos, lic_concluidas) %>%
+  select(nome_municipio, soma_vl_contrato, valor_sobre_pop, valor_sobre_casos, lic_concluidas) %>%
   unique() %>%
-head(arrange(desc(soma_vl_item_contrato)), n = 10) %>%
-  kable(align="l", format.args = list(big.mark = ","), digits=2) %>%
-  kable_styling(bootstrap_options = c("striped"), position = "center")
-```
-
-## 10 maiores contratantes
-```{r}
-soma_mun_item_contr %>%
-  select(nome_municipio, soma_vl_item_contrato, valor_sobre_pop, valor_sobre_casos, lic_concluidas) %>%
-  unique() %>%
-  head(arrange(desc(lic_concluidas)), n = 10) %>%
-  kable(align="l", format.args = list(big.mark = ","), digits=2) %>%
-  kable_styling(bootstrap_options = c("striped"), position = "center")
-```
-
-## 10 maiores fornecedores por número de contrato
-```{r}
-head(arrange(fornecedores,desc(lic_concluidas)), n = 10) %>%
-  kable(align="l", format.args = list(big.mark = ","), digits=2) %>%
-  kable_styling(bootstrap_options = c("striped"), position = "center")
-```
-
-## 10 maiores fornecedores por valor
-```{r}
-fornecedores %>%
-  filter(!is.na(razao_social)) %>%
-  arrange(desc(vl_contrato)) %>%
-  head(n = 20) %>%
-  select(lic_concluidas,municipios_contratantes,vl_contrato,razao_social,data_situacao_cadastral) %>%
+head(arrange(desc(soma_vl_contrato)), n = 10) %>%
   kable(align="l", format.args = list(big.mark = ","), digits=2) %>%
   kable_styling(bootstrap_options = c("striped"), position = "center")
 ```
