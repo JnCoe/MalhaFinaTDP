@@ -323,6 +323,8 @@ reg_itens_analise2 <- reg_itens_analise2 %>%
 
 # II. Descrição
 
+Aqui serão apresentados os dados gerados anteriormente. As análises e conclusões inferidas a partir deles estão detalhadas na seção IV.
+
 ## Número de municípios com contratos
 ```{r}
 length(unique(item_contrato$cd_municipio_ibge))
@@ -383,4 +385,90 @@ soma_mun_item_contr %>%
 head(arrange(desc(soma_vl_contrato)), n = 10) %>%
   kable(align="l", format.args = list(big.mark = ","), digits=2) %>%
   kable_styling(bootstrap_options = c("striped"), position = "center")
+```
+
+
+# III. Termos mais comuns e EPI
+
+Nesta seção, vamos verificar quais os termos mais comuns nas descrições dos itens.
+
+## Tabela de frequência de palavras com base na descrição completa
+```{r}
+data.frame(table(unlist(strsplit(tolower(iconv(item_contrato$ds_item, from="UTF-8", to="ASCII//TRANSLIT")), " ")))) %>%
+  arrange(desc(Freq)) %>%
+  kable(align="l", format.args = list(big.mark = ","), digits=0) %>%
+  kable_styling(bootstrap_options = c("striped"), position = "center") %>%
+  scroll_box(width = "100%", height = "200px")
+```
+
+## Tabela de frequência de palavras com base nas três primeiras palavras da descrição
+```{r}
+data.frame(table(unlist(strsplit(tolower(iconv(item_contrato$ds_3, from="UTF-8", to="ASCII//TRANSLIT")), " ")))) %>%
+  arrange(desc(Freq)) %>%
+  kable(align="l", format.args = list(big.mark = ","), digits=0) %>%
+  kable_styling(bootstrap_options = c("striped"), position = "center") %>%
+  scroll_box(width = "100%", height = "200px")
+```
+
+É possível notar que alguns itens frequentes nas compras do RS também estão presentes em PE. Tais como Luva, Mascara, Alcool, Avental etc.
+
+Assim como antes, podemos gerar um gráfico com o número de contratos para cada um dos itens
+
+```{r}
+selecao <- c("mascara","aventa","luva","macac","touca","oculos","jaleco","sapatilha","teste","alcoo","sabonete","sabao","detergente","desinfetante","uniforme","detergente","hipoclorito","sapato","viseira")
+
+reg_itens_analise <- item_contrato %>%
+  mutate(ds_item = tolower(iconv(ds_item, from="UTF-8", to="ASCII//TRANSLIT")))
+
+# Filtrar pela seleção de itens
+reg_itens_analise <- selecao %>%
+  purrr::map(function(x) {
+    reg_itens_analise %>%
+      mutate(selec = stringr::str_detect(ds_item, x), categoria_item = x) %>%
+      filter(selec == TRUE)
+  }) %>%
+  bind_rows() %>%
+  distinct(id_item_contrato, .keep_all= TRUE)
+
+reg_itens_analise2 <- reg_itens_analise %>%
+  mutate(nivel_data2 = lubridate::floor_date(as.Date(stringr::str_sub(dt_inicio_vigencia, start = 1L, end = 10), tryFormats = c("%Y-%m-%d")),"month")) %>%  group_by(categoria_item,nivel_data2) %>%
+  mutate(median_price = median(vl_item_contrato, na.rm=T),
+         price_perc = vl_item_contrato/median_price)%>%
+  ungroup
+
+pal <- RColorBrewer::brewer.pal(name = "Set2", n = 7)
+
+reg_itens_analise2 %>%
+  group_by(categoria_item,nivel_data2) %>%
+  mutate(median_price = median(vl_item_contrato, na.rm=T),
+         compras = n(),
+         soma_gastos = sum(vl_item_contrato),
+         soma_unidades = sum(qt_itens_contrato)) %>%
+  select(categoria_item,nivel_data2,median_price,compras,soma_gastos,soma_unidades) %>%
+  unique() %>%
+  filter(categoria_item %in% c("alcoo", "mascara", "luva", "teste") & nivel_data2>as.Date("2020-01-02") & nivel_data2<as.Date("2021-06-01")) %>%
+  ggplot(aes(x=nivel_data2, y=compras, group=categoria_item, color=categoria_item)) +
+  scale_color_manual(labels = c("Álcool", "Luva", "Máscara", "Teste"), values=pal) +
+  labs(colour = "Item") + xlab("Mês") + ylab("Número de contratos") +
+  scale_x_date(date_labels="%b",date_breaks  ="1 month") +
+  geom_line()
+```
+
+Mediana do preço:
+```{r}
+reg_itens_analise2 %>%
+  group_by(categoria_item,nivel_data2) %>%
+  mutate(median_price = median(vl_item_contrato, na.rm=T),
+         compras = n(),
+         soma_gastos = sum(vl_item_contrato),
+         soma_unidades = sum(qt_itens_contrato)) %>%
+  select(categoria_item,nivel_data2,median_price,compras,soma_gastos,soma_unidades) %>%
+  unique() %>%
+  filter(categoria_item %in% c("alcoo", "mascara", "luva", "teste") & nivel_data2>as.Date("2020-01-02") & nivel_data2<as.Date("2021-06-01")) %>%
+  ggplot(aes(x=nivel_data2, y=median_price, group=categoria_item, color=categoria_item)) +
+  scale_color_manual(labels = c("Álcool", "Luva", "Máscara", "Teste"), values=pal) +
+  labs(colour = "Item") + xlab("Mês") + ylab("Mediana do preço (escala logarítmica)") +
+  scale_x_date(date_labels="%b",date_breaks  ="1 month") +
+  scale_y_continuous(trans='log10') +
+  geom_line()
 ```
