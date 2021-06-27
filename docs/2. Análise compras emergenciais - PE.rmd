@@ -354,7 +354,7 @@ soma_mun_item_contr %>%
   select(nome_municipio, soma_vl_contrato, pop, casos_acumulado, obitos_acumulado, lic_concluidas, valor_sobre_pib, valor_sobre_pop, casos_sobre_hab, obitos_sobre_hab) %>%
   unique() %>%
   arrange(desc(as.numeric(soma_vl_contrato))) %>%
-  DT::datatable(filter = 'top') %>%
+  DT::datatable(filter = 'top', options = list(scrollX='600px')) %>%
   DT::formatRound(c("soma_vl_contrato", "valor_sobre_pib", "valor_sobre_pop", "casos_sobre_hab", "obitos_sobre_hab"), digits=2) %>%
   DT::formatCurrency("soma_vl_contrato", currency="R$") %>%
   DT::formatRound(c('pop', 'casos_acumulado', 'obitos_acumulado'), interval = 3, digits=0)
