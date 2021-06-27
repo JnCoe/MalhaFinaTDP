@@ -8,6 +8,7 @@ output:
     toc_float: true
     df_print: paged
     code_folding: hide
+    self_contained: false
 ---
 ```{css, echo=FALSE}
 body {
@@ -19,7 +20,7 @@ body {
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 library(dplyr)
 library(ggplot2)
 library(knitr)
@@ -365,6 +366,22 @@ summary(lm(soma_vl_contrato ~ casos_acumulado, data=soma_mun_item_contr))
 summary(lm(soma_vl_contrato ~ casos_sobre_hab, data=soma_mun_item_contr))
 ```
 
+## Regressão gráfica de gastos com casos
+```{r, results='asis'}
+dump <- soma_mun_item_contr %>%
+  ungroup() %>%
+  select(nome_municipio, soma_vl_contrato, casos_acumulado) %>%
+  unique() %>%
+  mutate(casos_acumulado.html.tooltip = as.character(glue::glue("<p><b>{nome_municipio}</b></br>Casos acumulados nominal (Junho 2021): {casos_acumulado}</br>Total contratado: {soma_vl_contrato}</p>"))) %>%
+  mutate(casos_acumulado = log(casos_acumulado), soma_vl_contrato = log(soma_vl_contrato)) %>%
+  select(soma_vl_contrato, casos_acumulado, casos_acumulado.html.tooltip) %>%
+  googleVis::gvisScatterChart(options = list(trendlines = "{0 : {type: 'linear', color: 'black'}}", dataOpacity = 0.7, height=500, hAxis = "{viewWindowMode: 'maximized', title: 'Casos acumulados - Junho 2021 (log)'}", vAxis = "{viewWindowMode: 'maximized', title: 'Total contratado - Junho 2021 (log R$)'}", tooltip="{isHtml:'true'}"))
+
+print(dump, "chart")
+```
+
+
+
 ## Tabela descritiva fornecedores
 ```{r}
 fornecedores %>%
@@ -395,19 +412,13 @@ Nesta seção, vamos verificar quais os termos mais comuns nas descrições dos 
 ## Tabela de frequência de palavras com base na descrição completa
 ```{r}
 data.frame(table(unlist(strsplit(tolower(iconv(item_contrato$ds_item, from="UTF-8", to="ASCII//TRANSLIT")), " ")))) %>%
-  arrange(desc(Freq)) %>%
-  kable(align="l", format.args = list(big.mark = ","), digits=0) %>%
-  kable_styling(bootstrap_options = c("striped"), position = "center") %>%
-  scroll_box(width = "100%", height = "200px")
+  arrange(desc(Freq))
 ```
 
 ## Tabela de frequência de palavras com base nas três primeiras palavras da descrição
 ```{r}
 data.frame(table(unlist(strsplit(tolower(iconv(item_contrato$ds_3, from="UTF-8", to="ASCII//TRANSLIT")), " ")))) %>%
-  arrange(desc(Freq)) %>%
-  kable(align="l", format.args = list(big.mark = ","), digits=0) %>%
-  kable_styling(bootstrap_options = c("striped"), position = "center") %>%
-  scroll_box(width = "100%", height = "200px")
+  arrange(desc(Freq))
 ```
 
 É possível notar que alguns itens frequentes nas compras do RS também estão presentes em PE. Tais como Luva, Mascara, Alcool, Avental etc.
@@ -437,8 +448,11 @@ reg_itens_analise2 <- reg_itens_analise %>%
   ungroup
 
 pal <- RColorBrewer::brewer.pal(name = "Set2", n = 7)
+```
 
-reg_itens_analise2 %>%
+## Variação gráfica de contratos por mês
+```{r, results='asis'}
+dump <- reg_itens_analise2 %>%
   group_by(categoria_item,nivel_data2) %>%
   mutate(median_price = median(vl_item_contrato, na.rm=T),
          compras = n(),
@@ -446,29 +460,67 @@ reg_itens_analise2 %>%
          soma_unidades = sum(qt_itens_contrato)) %>%
   select(categoria_item,nivel_data2,median_price,compras,soma_gastos,soma_unidades) %>%
   unique() %>%
+  select(categoria_item, nivel_data2, compras) %>%
   filter(categoria_item %in% c("alcoo", "mascara", "luva", "teste") & nivel_data2>as.Date("2020-01-02") & nivel_data2<as.Date("2021-06-01")) %>%
-  ggplot(aes(x=nivel_data2, y=compras, group=categoria_item, color=categoria_item)) +
-  scale_color_manual(labels = c("Álcool", "Luva", "Máscara", "Teste"), values=pal) +
-  labs(colour = "Item") + xlab("Mês") + ylab("Número de contratos") +
-  scale_x_date(date_labels="%b",date_breaks  ="1 month") +
-  geom_line()
+  tidyr::pivot_wider(names_from = categoria_item, values_from = compras) %>%
+  arrange(desc(nivel_data2)) %>%
+  googleVis::gvisLineChart(xvar = 'nivel_data2', yvar = c("alcoo", "mascara", "luva", "teste"), options = list(height =500))
+
+print(dump, "chart")
 ```
 
-Mediana do preço:
+## Variação gráfica de preços por mês
+```{r, results='asis'}
+dump <- reg_itens_analise2 %>%
+  group_by(categoria_item,nivel_data2) %>%
+  mutate(median_price = median(vl_item_contrato, na.rm=T),
+         compras = n(),
+         soma_gastos = sum(vl_item_contrato),
+         soma_unidades = sum(qt_itens_contrato)) %>%
+  select(categoria_item,nivel_data2,median_price) %>%
+  unique() %>%
+  filter(categoria_item %in% c("alcoo", "mascara", "luva", "teste") & nivel_data2>as.Date("2020-01-02") & nivel_data2<as.Date("2021-06-01")) %>%
+  tidyr::pivot_wider(names_from = categoria_item, values_from = median_price) %>%
+  arrange(desc(nivel_data2)) %>%
+  mutate(teste.html.tooltip = paste0("Preço nominal: R$",teste), mascara.html.tooltip = paste0("Preço nominal: R$",mascara), luva.html.tooltip = paste0("Preço nominal: R$",luva), alcoo.html.tooltip = paste0("Preço nominal: R$",alcoo), teste = log(teste), alcoo = log(alcoo), mascara = log(mascara), luva = log(luva)) %>%
+  googleVis::gvisLineChart(xvar = 'nivel_data2', yvar = c("alcoo", "alcoo.html.tooltip", "mascara", "mascara.html.tooltip", "luva", "luva.html.tooltip", "teste", "teste.html.tooltip"), options = list(height=500, vAxis = "{title: 'Preço (log)'}"))
+
+print(dump, "chart")
+```
+
+# IV. Valores incompatíveis do contrato
+Como dito anteriormente, foi identificado que, ao contrário do RS, o valor do contrato no TCE-PE difere da soma dos valores dos itens. Essa seção busca destrinchar os contratos que encontram tal incoerência. Há muitos contratos com uma diferença inexpressiva de valor, por isso já vamos excluir aqueles cuja diferença seja menor que R$ 1,00.
+
 ```{r}
-reg_itens_analise2 %>%
-  group_by(categoria_item,nivel_data2) %>%
-  mutate(median_price = median(vl_item_contrato, na.rm=T),
-         compras = n(),
-         soma_gastos = sum(vl_item_contrato),
-         soma_unidades = sum(qt_itens_contrato)) %>%
-  select(categoria_item,nivel_data2,median_price,compras,soma_gastos,soma_unidades) %>%
+divergencias <- item_contrato %>%
+  group_by(id_contrato) %>%
+  summarise(total_contrato = sum(vl_item_contrato*qt_itens_contrato)) %>%
   unique() %>%
-  filter(categoria_item %in% c("alcoo", "mascara", "luva", "teste") & nivel_data2>as.Date("2020-01-02") & nivel_data2<as.Date("2021-06-01")) %>%
-  ggplot(aes(x=nivel_data2, y=median_price, group=categoria_item, color=categoria_item)) +
-  scale_color_manual(labels = c("Álcool", "Luva", "Máscara", "Teste"), values=pal) +
-  labs(colour = "Item") + xlab("Mês") + ylab("Mediana do preço (escala logarítmica)") +
-  scale_x_date(date_labels="%b",date_breaks  ="1 month") +
-  scale_y_continuous(trans='log10') +
-  geom_line()
+  left_join(select(info_contrato, id_contrato, vl_contrato, cd_orgao)) %>%
+  left_join(select(orgaos, cd_orgao, nome_municipio)) %>%
+  filter(total_contrato != vl_contrato) %>%
+  mutate(diferenca = total_contrato - vl_contrato) %>%
+  filter(abs(diferenca) > 1) %>%
+  arrange(desc(abs(diferenca)))
+
+divergencias
 ```
+Temos então 167 contratos nessa condição. O mais chamativo de todos eles consiste no 
+[Contrato nº 48010241/2020](https://comprasemergenciais.transparencia.org.br/contratos/fdb47081cada6470ef63777d290be6ed) da capital Recife. A soma dos itens do contrato totaliza bilhões de reais, enquanto o valor correto é um milésimo disso, 2,7 milhões de reais. Um dos principais problemas consiste nas unidades reportadas no item. Os dados inseridos pela prefeitura dão a entender que houveram 67.500.000 unidades compradas do primeiro item (Dieta nutricionalmente completa) e 3.600.000 unidades do segundo (Nutrição parentaral com até 100gr de aminoácidos). Consultando a [íntegra do contrato](https://sistemas.tce.pe.gov.br/audinArquivos/licon/contrato/512/LICON_Contrato_512_2020_48010241_893329.pdf) fica claro que houve um erro de digitação ao inserir 1000 vezes mais unidades do que o acordo previsto.
+
+Nesse caso, por conta de um erro de digitação no número de unidades, a soma dos itens ultrapassou o valor do contrato. Mas há casos em que houve erro de digitação nas informações do contrato, deixando-o além do valor real acordado, o que pode ser percebido por ser maior do que a soma do valor dos itens. É a situação do [Contrato nº 48010118/2020](https://comprasemergenciais.transparencia.org.br/contratos/7ac8935857e4d2b6fd3e2c180f571e41) também de Recife. Por algum motivo, o valor inserido no campo do contrato (R\$ 6.450.000,00) não é o mesmo presente na [íntegra do contrato](https://sistemas.tce.pe.gov.br/audinArquivos/licon/contrato/512/LICON_Contrato_512_2020_48010118_890468.pdf) (R\$4.300.000,00). Uma observação relevante é que esse contrato foi posteriormente rescindido por acordo entre as partes.
+
+Vamos listar os municípios que apresentam as maiores divergências
+
+```{r}
+divergencias %>%
+  group_by(nome_municipio) %>%
+  summarise(n_div = n_distinct(id_contrato), total_divergencias = sum(abs(diferenca))) %>%
+  arrange(desc(total_divergencias))
+```
+
+Recife aparece com destaque não apenas pela soma de divergências - o que é esperando considerando o erro bilionário de digitação visto anteriormente - mas também com o segundo maior número de contratos com valores divergentes, com um total de 18. Entretanto, é importante contextualizar que, por ser capital, o município também possui um número maior de contratos bem como valores elevados. Em contraste, Caruaru, a 4ª cidade mais populosa do estado, possui 21 contratos com valores incompatíveis entre o visto no campo de contrato e na soma dos valores dos itens. Em termos da soma dos valores, no entanto, o município encontra-se abaixo de diversos outros, com um total de R$ 58.014,34 divergentes.
+
+Depois de Recife, o município que possui o maior valor divergente é Vitória de Santo Antão, com R$ 1.635.519,72 diferentes entre o que está no campo de contrato e o que está na soma dos itens do contrato. Olhando em detalhes, fica evidente o motivo dessa divergência. No [Contrato nº 47/2020](https://comprasemergenciais.transparencia.org.br/contratos/5f8f5b3eca0d5cf1b70bc702406dea1d), há aquisição de uma cesta, com os itens descritos referindo-se às unidades presentes na cesta. Ocorre que foram contratadas 15 mil cestas ([íntegra do contrato](https://sistemas.tce.pe.gov.br/audinArquivos/licon/contrato/723/LICON_Contrato_723_2020_47_913166.pdf). Por isso o valor da soma dos itens precisa ser multiplicado por 15 mil para obter o valor correto presente no contrato. Os outros dois contratos incorretos no município se tratam de situações idênticas (Contratos nº [46/2020](https://comprasemergenciais.transparencia.org.br/contratos/b7578c8a0b052f40d3b89511e8671235) - [íntegra](https://sistemas.tce.pe.gov.br/audinArquivos/licon/contrato/723/LICON_Contrato_723_2021_002_975462.pdf) e [002/2021](https://comprasemergenciais.transparencia.org.br/contratos/bc263982e38e31040008b0f0eeb06b5d) - [íntegra](https://sistemas.tce.pe.gov.br/audinArquivos/licon/contrato/723/LICON_Contrato_723_2020_46_914454.pdf))
+
+> *ATENÇÃO: Talvez caiba verificar junto ao TCE-PE se isso de fato consiste numa forma incorreta de preencher os dados ou, pelo contrário, é o que é estabelecido, considerando que permite ver em mais detalhes quando a compra é de diversos itens. A outra alternativa seria prencheer apenas "15 mil cestas" no campo de itens.*
