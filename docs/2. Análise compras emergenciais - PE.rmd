@@ -387,7 +387,7 @@ print(dump, "chart")
 fornecedores %>%
   arrange(desc(vl_contrato)) %>%
   select(razao_social, nome_fantasia, lic_concluidas, municipios_contratantes, vl_contrato, municipio, data_situacao_cadastral, nr_documento_contratado) %>%
-  DT::datatable(filter = 'top') %>%
+  DT::datatable(filter = 'top', options = list(scrollX='600px')) %>%
   DT::formatRound("vl_contrato", digits=2) %>%
   DT::formatCurrency("vl_contrato", currency="R$") %>%
   DT::formatDate("data_situacao_cadastral", method = 'toLocaleDateString')
