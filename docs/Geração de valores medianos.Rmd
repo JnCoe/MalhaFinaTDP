@@ -1,0 +1,147 @@
+---
+title: "Geração de valores medianos"
+author: "Jonas Coelho"
+output: 
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_float:
+      collapsed: false
+    number_sections: true
+    df_print: paged
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(knitr)
+library(kableExtra)
+
+options(scipen = 9999)
+```
+
+# Introdução
+
+Esse documento busca exemplificar o processo de obtenção de médias e medianas dos itens adquiridos pelos municípios gaúchos e pernambucanos entre março de 2020 e junho de 2021.
+
+Os csvs obtidos são retirados diretamente da base do Tá de Pé - Compras Emergenciais.
+
+```{r message=FALSE, warning=FALSE}
+# Importar arquivos
+item_contrato <- readr::read_csv("../dados/item_contrato_covid.csv", col_types = readr::cols(.default = "c"))
+info_contrato <- readr::read_csv("../dados/info_contrato_covid.csv", col_types = readr::cols(.default = "c"))
+orgaos <- readr::read_csv("../dados/orgaos_covid.csv", col_types = readr::cols(.default = "c"))
+similares <- readr::read_csv("../dados/itens_similares_covid_11_06_2021.csv", col_types = readr::cols(.default = "c"))
+
+```
+
+Iremos utilizar duas tabelas: as de informações do contrato e de informações dos itens do contrato. Ambas serão filtradas para manter apenas as compras realizadas por entidades municipais.
+```{r}
+# Filtrar apenas dados municipais
+item_contrato_old <- item_contrato
+
+item_contrato <- item_contrato %>%
+  left_join(select(orgaos, id_orgao, cd_municipio_ibge, esfera), by="id_orgao") %>%
+  filter(esfera == "MUNICIPAL") %>%
+  mutate(vl_item_contrato = as.numeric(vl_item_contrato), vl_total_item_contrato = as.numeric(vl_total_item_contrato), qt_itens_contrato = as.numeric(qt_itens_contrato))
+
+info_contrato_old <- info_contrato
+
+info_contrato <- info_contrato %>%
+  filter(id_contrato %in% item_contrato$id_contrato) %>%
+  mutate(vl_contrato = as.numeric(vl_contrato))
+```
+
+
+# Cálculo presente no site do Tá de Pé
+
+O Tá de Pé utiliza a mediana do preço dos dos produtos com base nas primeiras palavras da descrição, traçando uma similaridade entre os produtos. 
+
+```{r}
+# Filtrar similares
+similares_filtrado <- similares %>%
+  mutate(ds_1_item_pesq = tolower(iconv(ds_1_item_pesq, from="UTF-8", to="ASCII//TRANSLIT")), ds_2_item_pesq = tolower(iconv(ds_2_item_pesq, from="UTF-8", to="ASCII//TRANSLIT")), ds_3_item_pesq = tolower(iconv(ds_3_item_pesq, from="UTF-8", to="ASCII//TRANSLIT")), unidade_medida_item_pesq = tolower(iconv(unidade_medida_item_pesq, from="UTF-8", to="ASCII//TRANSLIT"))) %>%
+  group_by(id_item_pesquisado) %>%
+  top_n(1, id_item_similar) %>%
+  filter(stringr::str_detect(ds_3_item_pesq, "mascara[s]?|teste[s]?|avental?|alcool?|luva[s]?|termometro?|macacao?|touca?|protetor?|oculos?|sabonete?|sabao?|oximetro?|jaleco?|detergente?|kit?"))
+
+medianas_pe <- similares_filtrado %>%
+  left_join(select(item_contrato, id_item_contrato, sigla_estado), by = c("id_item_pesquisado" = "id_item_contrato")) %>%
+  filter(sigla_estado == "PE") %>%
+  filter(stringr::str_detect(ds_1_item_pesq, "mascara[s]?|teste[s]?|avental?|alcool?|luva[s]?|termometro?|macacao?|touca?|protetor?|oculos?|sabonete?|sabao?|oximetro?|jaleco?|detergente?") & stringr::str_detect(unidade_medida_item_pesq,"un?|ud?")) %>%
+  group_by(ds_1_item_pesq) %>%
+  top_n(1, mediana_no_estado) %>%
+  select(ds_1_item_pesq, mediana_no_estado) %>%
+  unique()
+
+medianas_rs <- similares_filtrado %>%
+  left_join(select(item_contrato, id_item_contrato, sigla_estado), by = c("id_item_pesquisado" = "id_item_contrato")) %>%
+  filter(sigla_estado == "RS") %>%
+  filter(stringr::str_detect(ds_1_item_pesq, "mascara[s]?|teste[s]?|avental?|alcool?|luva[s]?|termometro?|macacao?|touca?|protetor?|oculos?|sabonete?|sabao?|oximetro?|jaleco?|detergente?") & unidade_medida_item_pesq == "un") %>%
+  group_by(ds_1_item_pesq) %>%
+  top_n(1, mediana_no_estado) %>%
+  select(ds_1_item_pesq, mediana_no_estado) %>%
+  unique()
+```
+
+Nesse caso, os itens são classificados de acordo com a escrita de cada palavra. Então, por exemplo, "luva-nitrilica" é considerada um item diferente de "luva". Por esse motivo, vamos gerar uma classificação mais abrangente, a partir da presença dos radicais das palavras na descrição dos produtos.
+
+```{r}
+#! Criar listas
+selecao <- c("mascara","aventa","luva","macac","touca","oculos","jaleco","sapatilha","teste","alcoo","sabonete","sabao","detergente","desinfetante","uniforme","detergente","hipoclorito","sapato","viseira")
+
+itens_convertidos <- item_contrato %>%
+  mutate(ds_item = tolower(iconv(ds_item, from="UTF-8", to="ASCII//TRANSLIT")))
+
+# Filtrar pela seleção de itens
+itens_convertidos <- selecao %>%
+  purrr::map(function(x) {
+    itens_convertidos %>%
+      mutate(selec = stringr::str_detect(ds_item, x), categoria_item = x) %>%
+      filter(selec == TRUE)
+  }) %>%
+  bind_rows() %>%
+  distinct(id_item_contrato, .keep_all= TRUE)
+
+# Adicionar data, filtrar valores insignificantes e manter apenas itens com compras por unidade
+itens_convertidos <- itens_convertidos %>%
+  mutate(sg_unidade_medida = tolower(iconv(sg_unidade_medida, from="UTF-8", to="ASCII//TRANSLIT"))) %>%
+  filter(vl_item_contrato > 0.1 & stringr::str_detect(sg_unidade_medida,"un?|ud?")) %>%
+  filter(!stringr::str_detect(ds_item, "lavadora de pressao|totem|totens|toten|dispenser")) %>%
+  group_by(categoria_item) %>%
+  mutate(nivel_data2 = lubridate::floor_date(as.Date(stringr::str_sub(dt_inicio_vigencia, start = 1L, end = 10), tryFormats = c("%Y-%m-%d")),"month")) %>%
+  ungroup()
+
+# Gerar DF por mês e UF
+itens_mes_uf <- itens_convertidos %>%
+  group_by(categoria_item,nivel_data2, sigla_estado) %>%
+  mutate(median_price = median(vl_item_contrato, na.rm=T),
+         n_itens = n()) %>%
+  ungroup %>%
+  select(categoria_item, sigla_estado, nivel_data2, median_price, n_itens) %>%
+  unique() %>%
+  filter(nivel_data2 > "2020-02-01")
+
+# Gerar DF unificado por mês apenas
+itens_mes <- itens_convertidos %>%
+  group_by(categoria_item,nivel_data2) %>%
+  mutate(median_price = median(vl_item_contrato, na.rm=T),
+         n_itens = n()) %>%
+  ungroup %>%
+  select(categoria_item, nivel_data2, median_price, n_itens) %>%
+  unique()%>%
+  filter(nivel_data2 > "2020-02-01")
+```
+
+Agora vamos exportar as tabelas em csv:
+
+```{r}
+write.csv2(itens_mes, file = '../dados/itens_mes.csv', row.names = FALSE, fileEncoding = 'UTF-8')
+write.csv2(itens_mes_uf, file = '../dados/itens_mes_uf.csv', row.names = FALSE, fileEncoding = 'UTF-8')
+write.csv2(medianas_pe, file = '../dados/medianas_pe.csv', row.names = FALSE, fileEncoding = 'UTF-8')
+write.csv2(medianas_rs, file = '../dados/medianas_rs.csv', row.names = FALSE, fileEncoding = 'UTF-8')
+```
