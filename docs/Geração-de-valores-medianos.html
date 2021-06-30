@@ -347,6 +347,9 @@ medianas_rs &lt;- similares_filtrado %&gt;%
   select(ds_1_item_pesq, mediana_no_estado) %&gt;%
   unique()</code></pre>
 <p>Nesse caso, os itens são classificados de acordo com a escrita de cada palavra. Então, por exemplo, “luva-nitrilica” é considerada um item diferente de “luva”. Por esse motivo, vamos gerar uma classificação mais abrangente, a partir da presença dos radicais das palavras na descrição dos produtos.</p>
+</div>
+<div id="cálculo-arquivos-itens_mes-e-itens_mes_uf" class="section level1" number="3">
+<h1 number="3"><span class="header-section-number">3</span> Cálculo arquivos itens_mes e itens_mes_uf</h1>
 <pre class="r"><code>#! Criar listas
 selecao &lt;- c(&quot;mascara&quot;,&quot;aventa&quot;,&quot;luva&quot;,&quot;macac&quot;,&quot;touca&quot;,&quot;oculos&quot;,&quot;jaleco&quot;,&quot;sapatilha&quot;,&quot;teste&quot;,&quot;alcoo&quot;,&quot;sabonete&quot;,&quot;sabao&quot;,&quot;detergente&quot;,&quot;desinfetante&quot;,&quot;uniforme&quot;,&quot;detergente&quot;,&quot;hipoclorito&quot;,&quot;sapato&quot;,&quot;viseira&quot;)
 

@@ -90,6 +90,8 @@ medianas_rs <- similares_filtrado %>%
 
 Nesse caso, os itens são classificados de acordo com a escrita de cada palavra. Então, por exemplo, "luva-nitrilica" é considerada um item diferente de "luva". Por esse motivo, vamos gerar uma classificação mais abrangente, a partir da presença dos radicais das palavras na descrição dos produtos.
 
+# Cálculo arquivos itens_mes e itens_mes_uf
+
 ```{r}
 #! Criar listas
 selecao <- c("mascara","aventa","luva","macac","touca","oculos","jaleco","sapatilha","teste","alcoo","sabonete","sabao","detergente","desinfetante","uniforme","detergente","hipoclorito","sapato","viseira")
