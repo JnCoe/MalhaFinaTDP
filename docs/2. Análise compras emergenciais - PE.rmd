@@ -562,3 +562,90 @@ dump <- reg_itens_analise2 %>%
 print(dump, "chart")
 ```
 
+# Malha fina 2.0
+
+Nessa seção, iremos buscar por fornecedores que possuem contratos com valores suspeitos. Para isso, vamos gerar duas análises: uma com base no faturamento máximo permitido para o porte da empresa e outra com base no capital social como proxy.
+
+Primeiramente, vamos criar as colunas adequadas:
+
+```{r}
+# Backup das planilhas antigas
+cnpjs_old <- cnpjs
+fornecedores_old <- fornecedores
+```
+
+```{r}
+# Criando coluna equivalente de valor máximo do faturameto
+cnpjs <- cnpjs %>%
+  mutate(limite_faturamento = case_when(porte_empresa == 'Microempresa' & opcao_pelo_mei == 'N' ~ 360000, porte_empresa == 'Microempresa' & opcao_pelo_mei == 'S' ~ 81000, porte_empresa == 'Empresa de pequeno porte' ~ 4800000),
+         # Criando coluna com o capital social "NA" se ele for 0
+         capital_ajustado = as.numeric(ifelse(capital_social_empresa == '0', NA, capital_social_empresa)))
+```
+
+Agora vamos pegar a tabela de fornecedores gerada nas seções anteriores com os valores agregados por CNPJ e dar join para obter as duas colunas acima. Em seguida, vamos criar duas colunas binárias (0,1) para indicar se o fornecedor ultrapassou o valor do capital social ou máximo permitido pelo porte.
+```{r}
+fornecedores <- fornecedores %>%
+  left_join(select(cnpjs, cnpj, limite_faturamento, capital_ajustado, data_inicio_atividade), by = c('nr_documento_contratado' = 'cnpj')) %>%
+  mutate(ultra_faturamento = ifelse(vl_contrato > limite_faturamento, 1, 0), ultra_capital = ifelse(vl_contrato > capital_ajustado, 1, 0))
+```
+
+Agora filtrando os fornecedores suspeitos.
+```{r}
+suspeitos_faturamento <- fornecedores %>%
+  filter(ultra_faturamento == 1)
+
+suspeitos_capital <- fornecedores %>%
+  filter(ultra_capital == 1)
+
+suspeitos <- fornecedores %>%
+  filter(ultra_faturamento == 1 | ultra_capital == 1)
+```
+
+## Suspeitos pelo capital social
+A primeira análise consiste nos fornecedores que obteram contratos que ultrapassa seu capital social. Nesse caso, não há nenhum empecilho legal e portanto essa métrica é menos precisa, mas pode ser um bom parâmetro para indicar compras suspeitas.
+
+```{r}
+suspeitos_capital %>%
+  nrow()
+```
+
+Temos 317 fornecedores nessa condição, praticamente um terço dos 974 que operaram em PE no período analisado.
+
+### Gráfico com fornecedores suspeitos por capital social
+Vamos visualizar graficamente quais são. No gráfico abaixo, o eixo Y consiste no número de dias que a empresa existe e o eixo X consiste no valor total contratado. As bolinhas vermelhas indicam que o fornecedor fechou contrato com apenas um município, enquanto as azuis indicam fornecedores com contratos em mais de uma prefeitura.
+
+```{r, results='asis'}
+dump <- suspeitos_capital %>%
+  mutate(dias_existencia = as.integer(as.Date('12-07-2021', tryFormats = c("%d-%m-%Y")) - as.Date(data_inicio_atividade, tryFormats = c("%Y-%m-%d")))) %>%
+  mutate(dias_existencia.html.tooltip = as.character(glue::glue("<p><b>CNPJ: {nr_documento_contratado}</b></br>Razão Social: {razao_social}</br>Nome Fantasia: {nome_fantasia}</br>Data início atividade: {data_situacao_cadastral}</br>Limite Faturamento: R$ {format(round(limite_faturamento, 0), nsmall=0, big.mark='.', decimal.mark=',')}</br>Capital social: R$ {format(round(as.integer(capital_ajustado), 0), nsmall=0, big.mark='.', decimal.mark=',')}</br>Total contratado: R$ {format(round(vl_contrato, 0), nsmall=0, big.mark='.', decimal.mark=',')}</br>Licitações vencidas: {lic_concluidas}</br>Municípios com contrato: {municipios_contratantes}</p>"))) %>%
+    mutate(dias_existencia.style = ifelse(municipios_contratantes == 1, 'point {fill-color: Tomato; }', 'point {fill-color: SteelBlue; }')) %>%
+  select(vl_contrato, dias_existencia, dias_existencia.style, dias_existencia.html.tooltip) %>%
+  googleVis::gvisScatterChart(options = list(dataOpacity = 0.5, height=500, hAxis = "{viewWindowMode: 'maximized', title: 'Valor Contratado (escala logarítimica)', logScale: 'true'}", vAxis = "{viewWindowMode: 'maximized', title: 'Dias existência (escala logarítimica)', logScale: 'true'}", tooltip="{isHtml:'true'}", legend = 'none')) 
+
+print(dump, "chart")
+```
+
+## Suspeitos pelo porte
+Vamos verificar agora quantos fornecedores tiveram contratos acima do faturamento anual permitido para o seu porte. Essa métrica é mais precisa conforme indica um padrão legal para estipular o faturamento da empresa nos anos anteriores. Se os valores contratados apenas no universo observado com as prefeituras pernambucanas forem pagos ainda esse ano, todas essas empresas serão obrigadas a trocar seu porte no cadastro da Receita ou estarão em situação irregular.
+
+```{r}
+suspeitos_faturamento %>%
+  nrow()
+```
+
+Apenas 67, uma estimativa mais crível. Vamos verificar graficamente se conseguimos identificar padrões exóticos.
+
+### Gráfico com fornecedores suspeitos por porte / limite de faturamento
+Vamos visualizar graficamente quais são. No gráfico abaixo, o eixo Y consiste no número de dias que a empresa existe e o eixo X consiste no valor total contratado. As bolinhas vermelhas indicam que o fornecedor fechou contrato com apenas um município, enquanto as azuis indicam fornecedores com contratos em mais de uma prefeitura.
+
+```{r, results='asis'}
+dump <- suspeitos_faturamento %>%
+  mutate(dias_existencia = as.integer(as.Date('12-07-2021', tryFormats = c("%d-%m-%Y")) - as.Date(data_inicio_atividade, tryFormats = c("%Y-%m-%d")))) %>%
+  mutate(dias_existencia.html.tooltip = as.character(glue::glue("<p><b>CNPJ: {nr_documento_contratado}</b></br>Razão Social: {razao_social}</br>Nome Fantasia: {nome_fantasia}</br>Data início atividade: {data_situacao_cadastral}</br>Limite Faturamento: R$ {format(round(limite_faturamento, 0), nsmall=0, big.mark='.', decimal.mark=',')}</br>Capital social: R$ {format(round(as.integer(capital_ajustado), 0), nsmall=0, big.mark='.', decimal.mark=',')}</br>Total contratado: R$ {format(round(vl_contrato, 0), nsmall=0, big.mark='.', decimal.mark=',')}</br>Licitações vencidas: {lic_concluidas}</br>Municípios com contrato: {municipios_contratantes}</p>"))) %>%
+    mutate(dias_existencia.style = ifelse(municipios_contratantes == 1, 'point {fill-color: Tomato; }', 'point {fill-color: SteelBlue; }')) %>%
+  select(vl_contrato, dias_existencia, dias_existencia.style, dias_existencia.html.tooltip) %>%
+  googleVis::gvisScatterChart(options = list(dataOpacity = 0.5, height=500, hAxis = "{viewWindowMode: 'maximized', title: 'Valor Contratado (escala logarítimica)', logScale: 'true'}", vAxis = "{viewWindowMode: 'maximized', title: 'Dias existência (escala logarítimica)', logScale: 'true'}", tooltip="{isHtml:'true'}", legend = 'none')) 
+
+print(dump, "chart")
+```
+
