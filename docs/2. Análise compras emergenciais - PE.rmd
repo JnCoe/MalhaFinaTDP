@@ -466,19 +466,6 @@ print(dump, "chart")
 
 Assim como no RS, é possível observar um pico de compras desses medicamentos em agosto, com subsequente queda. Da mesma forma, uma observação também presente no estado gaúcho e pernambucano consiste na baixa proporção de contratos cloroquina e hidroxicloroquina, com preferência pelos outros dois medicamentos entre aquelas prefeituras que realizaram esse tipo de compra.
 
-## Fornecedores
-
-### Tabela descritiva fornecedores
-```{r}
-fornecedores %>%
-  arrange(desc(vl_contrato)) %>%
-  select(razao_social, nome_fantasia, lic_concluidas, municipios_contratantes, vl_contrato, municipio, data_situacao_cadastral, nr_documento_contratado) %>%
-  DT::datatable(filter = 'top', options = list(scrollX='600px')) %>%
-  DT::formatRound("vl_contrato", digits=2) %>%
-  DT::formatCurrency("vl_contrato", currency="R$") %>%
-  DT::formatDate("data_situacao_cadastral", method = 'toLocaleDateString')
-```
-
 # Termos mais comuns e EPI
 
 Nesta seção, vamos verificar quais os termos mais comuns nas descrições dos itens.
@@ -557,7 +544,7 @@ dump <- reg_itens_analise2 %>%
   tidyr::pivot_wider(names_from = categoria_item, values_from = median_price) %>%
   arrange(desc(nivel_data2)) %>%
   mutate(teste.html.tooltip = paste0("Preço nominal: R$",teste), mascara.html.tooltip = paste0("Preço nominal: R$",mascara), luva.html.tooltip = paste0("Preço nominal: R$",luva), alcoo.html.tooltip = paste0("Preço nominal: R$",alcoo), teste = log(teste), alcoo = log(alcoo), mascara = log(mascara), luva = log(luva)) %>%
-  googleVis::gvisLineChart(xvar = 'nivel_data2', yvar = c("alcoo", "alcoo.html.tooltip", "mascara", "mascara.html.tooltip", "luva", "luva.html.tooltip", "teste", "teste.html.tooltip"), options = list(height=500, vAxis = "{title: 'Preço (log)'}"))
+  googleVis::gvisLineChart(xvar = 'nivel_data2', yvar = c("alcoo", "alcoo.html.tooltip", "mascara", "mascara.html.tooltip", "luva", "luva.html.tooltip", "teste", "teste.html.tooltip"), options = list(height=500, vAxis = "{title: 'Preço (log)', logScale: 'true'}"))
 
 print(dump, "chart")
 ```
@@ -648,4 +635,24 @@ dump <- suspeitos_faturamento %>%
 
 print(dump, "chart")
 ```
+
+O método de controle pelo faturamento parece mais adequado, mas há uma sobreposição de ambos, então é possível utilizar o capital social como proxy para análises menos conservadoras.
+
+Os casos mais marcantes são os da já conhecida Juvanete Barreto / Brasmed e da Axialmed, que foi fundada em agosto de 2020 e mesmo sendo Micro-Empresa (limite de 360 mil), já possui contratos de mais de R$ 500 mil. Chama a atenção também a empresa S D DE A FERREIRA & CIA, que também é micro-empresa, além de relativo baixo capital social (R\$ 50 mil) mas possui mais de R\$ 3,5 milhões em contratos. No entanto, cumpre observar que foram fechados contratos com mais de 17 municípios pernambucanos através desse cnpj.
+
+Uma coisa curiosa que consta observar é que há empresa que mesmo sendo micro-empresa (ou seja, faturamento anual máximo de 360 mil), possuem capital social considerável, como a Berlin Finance, cujo capital social ultrapassa R$ 4 milhões.
+
+A relação completa dos fornecedores com seus respectivos dados consolidados pode ser explorada na tabela abaixo:
+
+## Tabela com dados fornecedores
+
+```{r}
+fornecedores %>%
+  arrange(desc(vl_contrato)) %>%
+  DT::datatable(filter = 'top', options = list(scrollX='600px')) %>%
+  DT::formatRound("vl_contrato", digits=2) %>%
+  DT::formatCurrency("vl_contrato", currency="R$") %>%
+  DT::formatDate("data_inicio_atividade", method = 'toLocaleDateString')
+```
+
 
